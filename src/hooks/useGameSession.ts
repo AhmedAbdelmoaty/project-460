@@ -10,7 +10,7 @@ import {
   GAME_LIMITS 
 } from '@/types/game';
 import { mainScenario } from '@/data/scenario';
-import { canRejectHypothesisWithEvidence, canDeclareWithEvidence, generateDetailedFailureFeedback } from '@/lib/gameLogic';
+import { canRejectHypothesisWithEvidence, canDeclareWithEvidence } from '@/lib/gameLogic';
 
 export type GameScreen = 'welcome' | 'intro' | 'gameplay' | 'failure' | 'gameover' | 'success';
 
@@ -60,38 +60,29 @@ export function useGameSession() {
     setScreen('gameplay');
   }, [session]);
 
-  // تنفيذ فعل (جمع دليل)
-  const performAction = useCallback((actionId: ActionId): { evidenceIds: EvidenceId[] } => {
+  // تنفيذ فعل
+  const performAction = useCallback((actionId: ActionId): { evidenceId: EvidenceId | null } => {
     if (!session || stepsUsed >= GAME_LIMITS.MAX_STEPS) {
-      return { evidenceIds: [] };
+      return { evidenceId: null };
     }
 
     const action = mainScenario.actions.find(a => a.id === actionId);
     if (!action || actionId === 'declare_solution') {
-      return { evidenceIds: [] };
+      return { evidenceId: null };
     }
 
-    // استهلاك خطوة لجمع الأدلة
     const newStep: Step = {
       stepNumber: stepsUsed + 1,
       action: actionId,
       timestamp: Date.now(),
     };
 
-    const newEvidenceIds: EvidenceId[] = [];
+    let evidenceId: EvidenceId | null = null;
 
-    // جمع جميع الأدلة من هذا الفعل (قد يكون أكثر من دليل)
-    if (action.yieldsEvidence) {
-      for (const evidenceId of action.yieldsEvidence) {
-        if (!discoveredEvidence.includes(evidenceId)) {
-          newEvidenceIds.push(evidenceId);
-        }
-      }
-    }
-
-    if (newEvidenceIds.length > 0) {
-      newStep.result = `discovered_${newEvidenceIds.join('_')}`;
-      setDiscoveredEvidence(prev => [...prev, ...newEvidenceIds]);
+    if (action.yieldsEvidence && !discoveredEvidence.includes(action.yieldsEvidence)) {
+      evidenceId = action.yieldsEvidence;
+      newStep.result = `discovered_${evidenceId}`;
+      setDiscoveredEvidence(prev => [...prev, evidenceId!]);
     }
 
     setSession(prev => {
@@ -100,24 +91,24 @@ export function useGameSession() {
       attempts[currentAttemptIndex] = {
         ...attempts[currentAttemptIndex],
         steps: [...attempts[currentAttemptIndex].steps, newStep],
-        discoveredEvidence: [...attempts[currentAttemptIndex].discoveredEvidence, ...newEvidenceIds],
+        discoveredEvidence: evidenceId 
+          ? [...attempts[currentAttemptIndex].discoveredEvidence, evidenceId]
+          : attempts[currentAttemptIndex].discoveredEvidence,
       };
       return { ...prev!, attempts };
     });
 
-    // جمع الأدلة يستهلك خطوة
     setStepsUsed(prev => prev + 1);
 
-    return { evidenceIds: newEvidenceIds };
+    return { evidenceId };
   }, [session, stepsUsed, discoveredEvidence]);
 
-  // رفض فرضية - لا يستهلك خطوة!
+  // رفض فرضية
   const rejectHypothesis = useCallback((hypothesisId: HypothesisId, evidenceId: EvidenceId): { success: boolean; message: string } => {
     if (!session) {
       return { success: false, message: 'لا توجد جلسة نشطة' };
     }
 
-    // H3 هي الحل الصحيح - لا يمكن رفضها
     if (hypothesisId === 'H3') {
       return { success: false, message: 'لا يمكن رفض هذه الفرضية بهذا الدليل' };
     }
@@ -133,9 +124,9 @@ export function useGameSession() {
       prev.map(h => h.id === hypothesisId ? { ...h, status: 'rejected' as const } : h)
     );
 
-    // إضافة الخطوة - رفض الفرضية لا يستهلك خطوة (لذلك نستخدم stepNumber = stepsUsed وليس +1)
+    // إضافة الخطوة
     const newStep: Step = {
-      stepNumber: stepsUsed, // لا نزيد لأنه لا يستهلك خطوة
+      stepNumber: stepsUsed + 1,
       action: 'reject_hypothesis',
       hypothesis: hypothesisId,
       evidence: evidenceId,
@@ -154,12 +145,12 @@ export function useGameSession() {
       return { ...prev!, attempts };
     });
 
-    // ملاحظة: لا نزيد stepsUsed هنا - رفض الفرضية مجاني!
+    setStepsUsed(prev => prev + 1);
 
     return { success: true, message: 'تم رفض الفرضية بنجاح!' };
   }, [session, stepsUsed]);
 
-  // إعلان الحل - يستهلك خطوة
+  // إعلان الحل
   const declareSolution = useCallback((hypothesisId: HypothesisId, evidenceId: EvidenceId): { success: boolean } => {
     if (!session) {
       return { success: false };
@@ -183,9 +174,6 @@ export function useGameSession() {
       correct: valid,
     };
 
-    // الحصول على المحاولة الحالية قبل التحديث
-    const currentAttemptData = session.attempts[session.currentAttempt - 1];
-
     setSession(prev => {
       const attempts = [...prev!.attempts];
       const currentAttemptIndex = prev!.currentAttempt - 1;
@@ -205,14 +193,21 @@ export function useGameSession() {
       if (session.currentAttempt >= GAME_LIMITS.MAX_ATTEMPTS) {
         setScreen('gameover');
       } else {
-        // توليد feedback للفشل بناءً على المسار الفعلي
-        const feedback = generateDetailedFailureFeedback(
-          hypothesisId,
-          evidenceId,
-          discoveredEvidence,
-          hypotheses.filter(h => h.status === 'rejected').map(h => h.id)
-        );
-        setFailureFeedback(feedback);
+        // توليد feedback للفشل
+        const hasE2 = discoveredEvidence.includes('E2');
+        const hasE3 = discoveredEvidence.includes('E3');
+        const rejectedAny = hypotheses.some(h => h.status === 'rejected');
+
+        if (discoveredEvidence.length < 2) {
+          setFailureFeedback('لم تجمع معلومات كافية قبل إعلان النتيجة. المحلّل الجيد يبحث ويسأل قبل أن يحكم.');
+        } else if (hasE2 && !hasE3) {
+          setFailureFeedback('وقعت في فخ الدليل المُغري! بعض المعلومات تبدو مهمة لكنها لا تحسم شيء. ابحث عن الدليل الذي يكشف التناقض الحقيقي.');
+        } else if (!rejectedAny) {
+          setFailureFeedback('أعلنت النتيجة قبل ما تستبعد كل الاحتمالات الخاطئة. الحل الصحيح يظهر فقط عندما ترفض الخطأ بالدليل.');
+        } else {
+          setFailureFeedback('توقفت عند احتمال لم تتأكد منه بالأدلة. أحيانًا الدليل الذي يبدو مقنعًا لا يحكي القصة كاملة. أعد التفكير!');
+        }
+
         setScreen('failure');
       }
     }
