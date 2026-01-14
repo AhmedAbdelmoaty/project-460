@@ -259,15 +259,30 @@ export function useGameSession() {
   const retryAttempt = useCallback(() => {
     if (!session) return;
 
-    setSession(prev => ({
-      ...prev!,
-      currentAttempt: prev!.currentAttempt + 1,
-    }));
+    setSession(prev => {
+      if (!prev) return prev;
+
+      const nextAttemptNumber = prev.currentAttempt + 1;
+      const newAttempt: Attempt = {
+        attemptNumber: nextAttemptNumber,
+        steps: [],
+        discoveredEvidence: [],
+        rejectedHypotheses: [],
+        status: 'in_progress',
+      };
+
+      return {
+        ...prev,
+        currentAttempt: nextAttemptNumber,
+        attempts: [...prev.attempts, newAttempt],
+      };
+    });
 
     // إعادة تعيين الحالة
     setHypotheses([...mainScenario.hypotheses]);
     setDiscoveredEvidence([]);
     setStepsUsed(0);
+    setFailureFeedback('');
     setScreen('gameplay');
   }, [session]);
 
