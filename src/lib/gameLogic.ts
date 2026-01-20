@@ -171,25 +171,27 @@ function deriveThinkingLevel(outcome: CaseOutcome, evidence: EvidenceStrength): 
 export function buildEvaluation(attempt: Attempt) {
   const outcome = attempt.finalDecision?.outcome || (attempt.status === 'no_decision' ? 'no_decision' : 'incorrect');
   const evidenceLevel = attempt.finalDecision?.justification || 'none';
-  const elimination = getEliminationQuality(attempt);
+  const eliminationInfo = getEliminationInfo(attempt);
+  const elimination = eliminationInfo.level;
+  const wrongRejectionCount = eliminationInfo.wrongCount;
   const noise = getNoiseQuality(attempt);
 
   const cards = {
     evidence: { level: evidenceLevel, text: evidenceCardText(evidenceLevel) },
-    elimination: { level: elimination, text: eliminationCardText(elimination) },
+    elimination: { level: elimination, text: eliminationCardText(elimination, wrongRejectionCount) },
     noise: { level: noise, text: noiseCardText(noise) },
   };
 
   const thinking = deriveThinkingLevel(outcome, evidenceLevel);
 
-  return { outcome, evidenceLevel, elimination, noise, cards, thinking };
+  return { outcome, evidenceLevel, elimination, noise, wrongRejectionCount, cards, thinking };
 }
 
 // =====================
 // 4) Feedback نهائي
 // =====================
 export function generateFeedback(attempt: Attempt): string {
-  const { outcome, evidenceLevel, elimination, noise } = buildEvaluation(attempt);
+  const { outcome, evidenceLevel, elimination, noise, wrongRejectionCount } = buildEvaluation(attempt);
 
   if (outcome === 'no_decision') {
     return 'جمعت معلومات… لكن ما حسمتش قرار. التحليل لازم ينتهي بقرار حتى لو في عدم يقين.';
@@ -219,7 +221,9 @@ export function generateFeedback(attempt: Attempt): string {
       return 'النتيجة صحيحة بدليل قوي، لكن المرة الجاية استبعد البدائل قبل ما تقفل.';
     }
     if (elimination === 'has_wrong') {
-      return 'وصلت للنتيجة، لكن عملت محاولة استبعاد غير دقيقة. راجع: كل رفض لازم يكون مربوط بدليل مناسب.';
+      if (wrongRejectionCount === 1) return 'وصلت للنتيجة، لكن عندك محاولة استبعاد غير دقيقة مرة واحدة.';
+      if (wrongRejectionCount === 2) return 'وصلت للنتيجة، لكن عندك محاولتين استبعاد غير دقيقتين.';
+      return `وصلت للنتيجة، لكن عندك ${wrongRejectionCount} محاولات استبعاد غير دقيقة.`;
     }
     return 'حل صحيح بدليل قوي. ممتاز، ومع شوية استبعاد أكتر هتكون أقوى.';
   }
