@@ -13,7 +13,8 @@ import { mainScenario } from '@/data/scenario';
 import {
   canRejectHypothesisWithEvidence,
   evaluateDeclaration,
-  generateFeedback,
+  calculateAttemptResult,
+  generateGameOverFeedback,
 } from '@/lib/gameLogic';
 
 export type GameScreen = 'welcome' | 'intro' | 'gameplay' | 'failure' | 'gameover' | 'success';
@@ -33,6 +34,8 @@ export function useGameSession() {
   const [discoveredEvidence, setDiscoveredEvidence] = useState<EvidenceId[]>([]);
   const [stepsUsed, setStepsUsed] = useState(0);
   const [failureFeedback, setFailureFeedback] = useState('');
+  const [failureScore, setFailureScore] = useState(0);
+  const [failureBreakdown, setFailureBreakdown] = useState<{ label: string; points: number }[]>([]);
 
   // بدء جلسة جديدة
   const startNewSession = useCallback(() => {
@@ -70,6 +73,8 @@ export function useGameSession() {
     setDiscoveredEvidence([]);
     setStepsUsed(0);
     setFailureFeedback('');
+    setFailureScore(0);
+    setFailureBreakdown([]);
     setScreen('gameplay');
   }, [session]);
 
@@ -126,89 +131,93 @@ export function useGameSession() {
   );
 
   // رفض فرضية (لا يستهلك خطوة) — الخطأ لا يُنهي المحاولة، لكنه يؤثر على التقييم
-const rejectHypothesis = useCallback(
-  (hypothesisId: HypothesisId, evidenceIds: EvidenceId[]): { success: boolean; message: string } => {
-    if (!session) {
-      return { success: false, message: 'لا توجد جلسة نشطة' };
-    }
-
-    // السماح بدليل واحد فقط
-    const picked = evidenceIds.slice(0, 1);
-
-    let localMessage = '';
-    let isValid = false;
-
-    setSession((prev) => {
-      const attempts = [...(prev?.attempts || [])];
-      const idx = (prev?.currentAttempt || 1) - 1;
-      const current = attempts[idx];
-      if (!current) return prev!;
-
-      // 1) حد أقصى 3 محاولات رفض لكل محاولة
-      const rejectsCount = current.steps.filter((s) => s.action === 'reject_hypothesis').length;
-      if (rejectsCount >= 4) {
-        localMessage = 'استخدمت كل محاولات الرفض في هذه المحاولة.';
-        return prev!;
-      }
-      const hypothesisRejectCount = current.steps.filter(
-        (s) => s.action === 'reject_hypothesis' && s.hypothesis === hypothesisId
-      ).length;
-      
-      if (hypothesisRejectCount >= 2) {
-        localMessage = 'وصلت للحد الأقصى لمحاولات رفض هذه الفرضية في هذه المحاولة.';
-        return prev!;
+  const rejectHypothesis = useCallback(
+    (hypothesisId: HypothesisId, evidenceIds: EvidenceId[]): { success: boolean; message: string } => {
+      if (!session) {
+        return { success: false, message: 'لا توجد جلسة نشطة' };
       }
 
-      // 3) تحقق صلاحية الرفض
-      if (hypothesisId === 'H3') {
-        // لا يوجد دليل في هذا الكيس ينفي H3 (مسموح المحاولة لكن تعتبر غلط)
-        isValid = false;
-        localMessage = 'الدليل ده لا يكفي لرفض هذه الفرضية.';
-      } else {
-        const result = canRejectHypothesisWithEvidence(hypothesisId as Exclude<HypothesisId, 'H3'>, picked);
-        isValid = result.valid;
-        localMessage = result.message || (result.valid ? 'تم رفض الفرضية ✓' : 'الربط غير صحيح.');
+      // السماح بدليل واحد فقط
+      const picked = evidenceIds.slice(0, 1);
+
+      let localMessage = '';
+      let isValid = false;
+
+      setSession((prev) => {
+        const attempts = [...(prev?.attempts || [])];
+        const idx = (prev?.currentAttempt || 1) - 1;
+        const current = attempts[idx];
+        if (!current) return prev!;
+
+        // 1) حد أقصى 4 عمليات Reject لكل محاولة
+        const rejectsCount = current.steps.filter((s) => s.action === 'reject_hypothesis').length;
+        if (rejectsCount >= 4) {
+          localMessage = 'استخدمت كل محاولات الرفض في هذه المحاولة.';
+          return prev!;
+        }
+
+        // 2) حد أقصى مرتين لنفس الفرضية في نفس المحاولة
+        const hypothesisRejectCount = current.steps.filter(
+          (s) => s.action === 'reject_hypothesis' && s.hypothesis === hypothesisId
+        ).length;
+
+        if (hypothesisRejectCount >= 2) {
+          localMessage = 'وصلت للحد الأقصى لمحاولات رفض هذه الفرضية في هذه المحاولة.';
+          return prev!;
+        }
+
+        // 3) تحقق صلاحية الرفض
+        if (hypothesisId === 'H3') {
+          // لا يوجد دليل في هذا الكيس ينفي H3 (مسموح المحاولة لكن تعتبر غلط)
+          isValid = false;
+          localMessage = 'الدليل ده لا يكفي لرفض هذه الفرضية.';
+        } else {
+          const result = canRejectHypothesisWithEvidence(hypothesisId as Exclude<HypothesisId, 'H3'>, picked);
+          isValid = result.valid;
+          localMessage = result.message || (result.valid ? 'تم رفض الفرضية ✓' : 'الربط غير صحيح.');
+        }
+
+        // 4) سجل خطوة الرفض دائماً (صح أو غلط) للتتبع
+        const nextStepNumber = current.steps.length + 1;
+
+        const newStep: Step = {
+          stepNumber: nextStepNumber,
+          action: 'reject_hypothesis',
+          hypothesis: hypothesisId,
+          evidence: picked,
+          valid: isValid,
+          timestamp: Date.now(),
+        };
+
+        attempts[idx] = {
+          ...current,
+          steps: [...current.steps, newStep],
+          rejectedHypotheses: isValid ? [...current.rejectedHypotheses, hypothesisId] : current.rejectedHypotheses,
+        };
+
+        return { ...prev!, attempts };
+      });
+
+      // لو اتمنع بسبب الحد
+      if (
+        localMessage === 'استخدمت كل محاولات الرفض في هذه المحاولة.' ||
+        localMessage === 'وصلت للحد الأقصى لمحاولات رفض هذه الفرضية في هذه المحاولة.'
+      ) {
+        return { success: false, message: localMessage };
       }
 
-      // 4) سجل خطوة الرفض دائماً (صح أو غلط) للتتبع
-      const nextStepNumber = current.steps.length + 1;
+      // لو الرفض صحيح، نغيّر حالة الفرضية
+      if (isValid) {
+        setHypotheses((prev) =>
+          prev.map((h) => (h.id === hypothesisId ? { ...h, status: 'rejected' as const } : h))
+        );
+        return { success: true, message: 'تم رفض الفرضية بدليل مناسب ✓' };
+      }
 
-      const newStep: Step = {
-        stepNumber: nextStepNumber,
-        action: 'reject_hypothesis',
-        hypothesis: hypothesisId,
-        evidence: picked,
-        valid: isValid,
-        timestamp: Date.now(),
-      };
-
-      attempts[idx] = {
-        ...current,
-        steps: [...current.steps, newStep],
-        rejectedHypotheses: isValid ? [...current.rejectedHypotheses, hypothesisId] : current.rejectedHypotheses,
-      };
-
-      return { ...prev!, attempts };
-    });
-
-    // لو اتمنع بسبب الحد/التكرار، هيرجع برسالة بدون تسجيل شيء جديد
-    if (localMessage === 'استخدمت كل محاولات الرفض في هذه المحاولة.' ||
-        localMessage === 'حاولت رفض هذه الفرضية بالفعل في هذه المحاولة.') {
-      return { success: false, message: localMessage };
-    }
-
-    // لو الرفض صحيح، نغيّر حالة الفرضية
-    if (isValid) {
-      setHypotheses((prev) =>
-        prev.map((h) => (h.id === hypothesisId ? { ...h, status: 'rejected' as const } : h))
-      );
-      return { success: true, message: 'تم رفض الفرضية بدليل مناسب ✓' };
-    }
-
-    return { success: false, message: localMessage || 'الربط غير صحيح.' };
-  },
-  [session]
-);
+      return { success: false, message: localMessage || 'الربط غير صحيح.' };
+    },
+    [session]
+  );
 
   // إعلان القرار النهائي (لا يستهلك خطوات التحقيق)
   const declareSolution = useCallback(
@@ -217,7 +226,6 @@ const rejectHypothesis = useCallback(
 
       // لا تسمح بأدلة غير مكتشفة
       const allowed = evidenceIds.filter((e) => discoveredEvidence.includes(e));
-
       const evaluation = evaluateDeclaration(hypothesisId, allowed);
 
       setSession((prev) => {
@@ -261,6 +269,7 @@ const rejectHypothesis = useCallback(
       // فشل = خسارة محاولة
       const attemptsLeftAfterThis = GAME_LIMITS.MAX_ATTEMPTS - session.currentAttempt;
       const current = session.attempts[session.currentAttempt - 1];
+
       const updatedAttempt: Attempt = {
         ...(current || {
           attemptNumber: session.currentAttempt,
@@ -277,9 +286,17 @@ const rejectHypothesis = useCallback(
           justification: evaluation.justification,
         },
       };
-      setFailureFeedback(generateFeedback(updatedAttempt));
+
+      const attemptResult = calculateAttemptResult(updatedAttempt, session.currentAttempt);
+      setFailureFeedback(attemptResult.feedbackText);
+      setFailureScore(attemptResult.score);
+      setFailureBreakdown(attemptResult.breakdown);
 
       if (attemptsLeftAfterThis <= 0) {
+        // Game Over: Feedback عام جدًا (بدون كشف حل)
+        setFailureFeedback(generateGameOverFeedback());
+        setFailureScore(0);
+        setFailureBreakdown([]);
         setScreen('gameover');
       } else {
         setScreen('failure');
@@ -329,10 +346,16 @@ const rejectHypothesis = useCallback(
       return { ...prev!, attempts };
     });
 
-    setFailureFeedback(generateFeedback(updatedAttempt));
+    const attemptResult = calculateAttemptResult(updatedAttempt, session.currentAttempt);
+    setFailureFeedback(attemptResult.feedbackText);
+    setFailureScore(attemptResult.score);
+    setFailureBreakdown(attemptResult.breakdown);
 
     const attemptsLeftAfterThis = GAME_LIMITS.MAX_ATTEMPTS - session.currentAttempt;
     if (attemptsLeftAfterThis <= 0) {
+      setFailureFeedback(generateGameOverFeedback());
+      setFailureScore(0);
+      setFailureBreakdown([]);
       setScreen('gameover');
     } else {
       setScreen('failure');
@@ -367,6 +390,8 @@ const rejectHypothesis = useCallback(
     setDiscoveredEvidence([]);
     setStepsUsed(0);
     setFailureFeedback('');
+    setFailureScore(0);
+    setFailureBreakdown([]);
     setScreen('gameplay');
   }, [session]);
 
@@ -377,6 +402,8 @@ const rejectHypothesis = useCallback(
     setDiscoveredEvidence([]);
     setStepsUsed(0);
     setFailureFeedback('');
+    setFailureScore(0);
+    setFailureBreakdown([]);
     setScreen('welcome');
   }, []);
 
@@ -391,6 +418,8 @@ const rejectHypothesis = useCallback(
       ? GAME_LIMITS.MAX_ATTEMPTS - session.currentAttempt + 1
       : GAME_LIMITS.MAX_ATTEMPTS,
     failureFeedback,
+    failureScore,
+    failureBreakdown,
     startNewSession,
     startAttempt,
     performAction,
