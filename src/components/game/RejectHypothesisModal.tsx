@@ -53,7 +53,7 @@ export function RejectHypothesisModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="max-w-md" dir="rtl">
+      <DialogContent className="max-w-md max-h-[85vh] flex flex-col" dir="rtl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <span className="text-2xl">❌</span>
@@ -61,7 +61,7 @@ export function RejectHypothesisModal({
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4 py-4">
+        <div className="flex-1 min-h-0 overflow-y-auto space-y-4 py-4">
           {discoveredEvidence.length === 0 ? (
             <div className="text-center py-6 space-y-3">
               <div className="text-4xl">🔍</div>
@@ -149,26 +149,29 @@ export function RejectHypothesisModal({
                 </div>
               )}
 
-              {/* أزرار */}
-              <div className="flex gap-2 pt-2">
-                <Button
-                  onClick={handleReject}
-                  disabled={!selectedHypothesis || !selectedEvidence}
-                  className="flex-1"
-                >
-                  رفض
-                </Button>
-                <Button onClick={handleClose} variant="outline">
-                  إغلاق
-                </Button>
-              </div>
-
               <p className="text-xs text-muted-foreground">
                 ملاحظة: الرفض الخاطئ لا ينهي المحاولة، لكنه يقلل جودة تقييمك.
               </p>
             </>
           )}
         </div>
+
+        {discoveredEvidence.length > 0 && (
+          <div className="border-t pt-4">
+            <div className="flex gap-2">
+              <Button
+                onClick={handleReject}
+                disabled={!selectedHypothesis || !selectedEvidence}
+                className="flex-1"
+              >
+                رفض
+              </Button>
+              <Button onClick={handleClose} variant="outline">
+                إغلاق
+              </Button>
+            </div>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
