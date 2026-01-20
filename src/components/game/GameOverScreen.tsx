@@ -19,10 +19,9 @@ export function GameOverScreen({ feedback, onRestart }: GameOverScreenProps) {
             <p className="text-foreground leading-relaxed">{feedback}</p>
           </div>
 
-          <div className="text-muted-foreground text-sm space-y-1">
-            <p>💡 الهدف مش حفظ الإجابة… الهدف هو المنهج.</p>
-            <p>🎯 ركّز على الدليل اللي يفرّق بين الفرضيات.</p>
-          </div>
+          <p className="text-muted-foreground text-sm">
+            جرّب تاني من البداية، وركز إنك تقارن أكتر من مؤشر قبل ما تحسم.
+          </p>
 
           <Button onClick={onRestart} size="lg" className="w-full text-lg py-6 font-bold" variant="outline">
             ابدأ من جديد 🔄
