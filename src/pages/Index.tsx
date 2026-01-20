@@ -16,6 +16,7 @@ const Index = () => {
     remainingSteps,
     remainingAttempts,
     failureFeedback,
+    failureScore,
     startNewSession,
     startAttempt,
     performAction,
