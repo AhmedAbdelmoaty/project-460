@@ -48,7 +48,7 @@ export function DeclareSolutionModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="max-w-md" dir="rtl">
+      <DialogContent className="max-w-md max-h-[85vh] flex flex-col" dir="rtl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <span className="text-2xl">✅</span>
@@ -56,7 +56,7 @@ export function DeclareSolutionModal({
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4 py-4">
+        <div className="flex-1 min-h-0 overflow-y-auto space-y-4 py-4">
           {discoveredEvidence.length === 0 ? (
             <div className="text-center py-6 space-y-3">
               <div className="text-4xl">⚠️</div>
@@ -151,22 +151,26 @@ export function DeclareSolutionModal({
                 </div>
               )}
 
-              {/* Action buttons */}
-              <div className="flex gap-2 pt-2">
-                <Button 
-                  onClick={handleDeclare} 
-                  disabled={!selectedHypothesis || selectedEvidence.length === 0}
-                  className="flex-1 bg-accent hover:bg-accent/90"
-                >
-                  أعلن الحل ✅
-                </Button>
-                <Button onClick={handleClose} variant="outline">
-                  إلغاء
-                </Button>
-              </div>
             </>
           )}
         </div>
+
+        {discoveredEvidence.length > 0 && (
+          <div className="border-t pt-4">
+            <div className="flex gap-2">
+              <Button
+                onClick={handleDeclare}
+                disabled={!selectedHypothesis || selectedEvidence.length === 0}
+                className="flex-1 bg-accent hover:bg-accent/90"
+              >
+                أعلن الحل ✅
+              </Button>
+              <Button onClick={handleClose} variant="outline">
+                إلغاء
+              </Button>
+            </div>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
