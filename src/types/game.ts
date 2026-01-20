@@ -3,12 +3,7 @@
 export type HypothesisId = 'H1' | 'H2' | 'H3';
 export type EvidenceId = 'E1' | 'E2' | 'E3' | 'E4' | 'E5';
 
-export type CharacterId =
-  | 'owner'
-  | 'salesperson'
-  | 'cashier'
-  | 'stockkeeper'
-  | 'customer';
+export type CharacterId = 'owner' | 'salesperson' | 'cashier' | 'stockkeeper' | 'customer';
 
 export type ActionId =
   | 'talk_salesperson'
@@ -25,7 +20,7 @@ export type AttemptStatus = 'in_progress' | 'success' | 'failed' | 'no_decision'
 
 export type CaseOutcome = 'correct' | 'incorrect' | 'no_decision';
 
-export type ThinkingLevel = 'sound' | 'weak' | 'unacceptable';
+export type JustificationQuality = 'strong' | 'weak' | 'invalid' | 'noise' | 'none';
 
 export interface Hypothesis {
   id: HypothesisId;
@@ -115,34 +110,20 @@ export interface TimelineItem {
   isPositive: boolean;
 }
 
-export type EvidenceStrength = 'strong' | 'weak' | 'invalid' | 'noise' | 'none';
-export type EliminationQuality = 'both_correct' | 'one_correct' | 'none' | 'has_wrong';
-export type NoiseQuality = 'clean' | 'overweighted_e2' | 'used_noise_e5';
+export type SuccessRank = 'خبير' | 'محلل كويس' | 'على الطريق' | 'يحتاج تدريب';
 
-export type JustificationQuality = EvidenceStrength;
-
-export interface EvaluationCards {
-  evidence: {
-    level: EvidenceStrength;
-    text: string;
-  };
-  elimination: {
-    level: EliminationQuality;
-    text: string;
-  };
-  noise: {
-    level: NoiseQuality;
-    text: string;
-  };
+export interface ScoreBreakdownItem {
+  label: string;
+  points: number;
 }
 
 export interface GameResult {
   outcome: CaseOutcome;
   outcomeTitle: string;
-  thinking: ThinkingLevel;
-  thinkingTitle: string;
-  cards: EvaluationCards;
+  score: number;
+  rank?: SuccessRank; // يظهر فقط في النجاح
   feedbackText: string;
+  breakdown: ScoreBreakdownItem[];
   timeline: TimelineItem[];
   attemptUsed: number;
 }
@@ -155,10 +136,13 @@ export const GAME_LIMITS = {
 };
 
 // قواعد رفض الفرضيات (Level 1)
-export const REJECTION_RULES: Record<Exclude<HypothesisId, 'H3'>, {
-  valid: EvidenceId[];
-  trap: EvidenceId[];
-}> = {
+export const REJECTION_RULES: Record<
+  Exclude<HypothesisId, 'H3'>,
+  {
+    valid: EvidenceId[];
+    trap: EvidenceId[];
+  }
+> = {
   H1: { valid: ['E1'], trap: ['E2', 'E5'] },
   H2: { valid: ['E3'], trap: ['E2', 'E5'] },
 };
@@ -167,12 +151,15 @@ export const REJECTION_RULES: Record<Exclude<HypothesisId, 'H3'>, {
 // strong: دليل يفرّق بوضوح
 // weak: مؤشر غير تشخيصي/لا يكفي وحده
 // invalid/noise: غير صالح كتبرير
-export const DECLARATION_RULES: Record<HypothesisId, {
-  strong: EvidenceId[];
-  weak: EvidenceId[];
-  invalid: EvidenceId[];
-  noise: EvidenceId[];
-}> = {
+export const DECLARATION_RULES: Record<
+  HypothesisId,
+  {
+    strong: EvidenceId[];
+    weak: EvidenceId[];
+    invalid: EvidenceId[];
+    noise: EvidenceId[];
+  }
+> = {
   H1: {
     strong: [],
     weak: [],
@@ -195,6 +182,6 @@ export const DECLARATION_RULES: Record<HypothesisId, {
 
 // رسائل الفخاخ/الضجيج (مختصرة وواضحة)
 export const TRAP_MESSAGES: Record<string, string> = {
-  E2: 'الرقم ده مغري، لكنه لوحده لا يحدد السبب. لازم مؤشر يفرّق بين الفرضيات.',
-  E5: 'ده رأي عام، مش دليل على المتجر ده تحديداً. حاول تعتمد على مؤشرات قابلة للقياس.',
+  E2: 'الرقم ده مغري، لكنه لوحده لا يحدد السبب. لازم مؤشر تاني يساعدك تحسم.',
+  E5: 'ده كلام عام… مش دليل على اللي بيحصل جوه المحل.',
 };
