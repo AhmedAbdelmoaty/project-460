@@ -3,17 +3,15 @@ import {
   CaseOutcome,
   DECLARATION_RULES,
   EvidenceId,
-  EvidenceStrength,
-  EliminationQuality,
   GameResult,
   GameSession,
   HypothesisId,
-  NoiseQuality,
+  JustificationQuality,
   REJECTION_RULES,
   Step,
+  SuccessRank,
   TimelineItem,
   TRAP_MESSAGES,
-  ThinkingLevel,
 } from '@/types/game';
 import { mainScenario } from '@/data/scenario';
 
@@ -50,7 +48,7 @@ export function evaluateDeclaration(
   evidenceIds: EvidenceId[]
 ): {
   outcome: CaseOutcome;
-  justification: EvidenceStrength;
+  justification: JustificationQuality;
 } {
   if (!evidenceIds || evidenceIds.length === 0) {
     return { outcome: 'incorrect', justification: 'none' };
@@ -88,152 +86,162 @@ export function evaluateDeclaration(
 }
 
 // =====================
-// 3) بناء بطاقات التقييم
+// 3) التقييم بالنقاط (بدون بطاقات)
 // =====================
-function getEliminationInfo(attempt: Attempt): { level: EliminationQuality; wrongCount: number } {
-  const rejected = attempt.steps.filter((s) => s.action === 'reject_hypothesis');
-  const validRejections = rejected.filter((s) => s.valid);
-  const wrongRejections = rejected.filter((s) => s.valid === false);
 
-  const wrongCount = wrongRejections.length;
-
-  if (wrongCount > 0) return { level: 'has_wrong', wrongCount };
-
-  const rejectedH1Correct = validRejections.some((s) => s.hypothesis === 'H1');
-  const rejectedH2Correct = validRejections.some((s) => s.hypothesis === 'H2');
-
-  if (rejectedH1Correct && rejectedH2Correct) return { level: 'both_correct', wrongCount: 0 };
-  if (rejectedH1Correct || rejectedH2Correct) return { level: 'one_correct', wrongCount: 0 };
-  return { level: 'none', wrongCount: 0 };
+function countOpenedEvidenceBeforeDecision(steps: Step[]): number {
+  const opened = new Set<EvidenceId>();
+  for (const s of steps) {
+    if (s.action === 'declare_solution') break;
+    if (typeof s.result === 'string' && s.result.startsWith('discovered_')) {
+      const id = s.result.replace('discovered_', '') as EvidenceId;
+      opened.add(id);
+    }
+  }
+  return opened.size;
 }
 
-function getNoiseQuality(attempt: Attempt): NoiseQuality {
+function didUseEvidence(steps: Step[], evidenceId: EvidenceId): boolean {
+  return steps.some((s) => Array.isArray(s.evidence) && s.evidence.includes(evidenceId));
+}
+
+function getSuccessRank(score: number): SuccessRank {
+  if (score >= 300) return 'خبير';
+  if (score >= 200) return 'محلل كويس';
+  if (score >= 120) return 'على الطريق';
+  return 'يحتاج تدريب';
+}
+
+function outcomeTitle(outcome: CaseOutcome): string {
+  switch (outcome) {
+    case 'correct':
+      return 'قرار صحيح';
+    case 'incorrect':
+      return 'قرار غير صحيح';
+    case 'no_decision':
+      return 'بدون قرار';
+  }
+}
+
+function buildScore(attempt: Attempt) {
+  const breakdown: { label: string; points: number }[] = [];
+
   const decision = attempt.finalDecision;
-  const usedE5InDecision = decision?.evidence?.includes('E5');
-  if (usedE5InDecision) return 'used_noise_e5';
+  const outcome: CaseOutcome = decision?.outcome || (attempt.status === 'no_decision' ? 'no_decision' : 'incorrect');
 
-  // وزن زائد لـ E2: لو اعتمد على E2 وحده في القرار
-  const usedOnlyE2 = decision?.evidence?.length === 1 && decision.evidence[0] === 'E2';
-  if (usedOnlyE2) return 'overweighted_e2';
+  // 1) قرار متسرع: أعلن قرار قبل ما يفتح دليلين
+  const openedBeforeDecision = countOpenedEvidenceBeforeDecision(attempt.steps || []);
+  const rushedDecision = (attempt.steps || []).some((s) => s.action === 'declare_solution') && openedBeforeDecision < 2;
 
-  return 'clean';
-}
-
-function evidenceCardText(level: EvidenceStrength): string {
-  switch (level) {
-    case 'strong':
-      return 'تبرير قوي: استخدمت دليل يفرّق بوضوح بين الفرضيات.';
-    case 'weak':
-      return 'تبرير ضعيف: استخدمت مؤشر عام لا يكفي وحده للحسم.';
-    case 'invalid':
-      return 'تبرير غير صالح: الدليل لا يدعم الحل منطقيًا.';
-    case 'noise':
-      return 'تبرير ضجيج: اعتمدت على رأي/انطباع بدل مؤشر.';
-    case 'none':
-      return 'بدون تبرير: ما استخدمتش دليل فعلي للقرار.';
+  // 2) نقاط القرار النهائي (الوزن الأكبر)
+  let decisionPoints = 0;
+  if (outcome === 'correct' && decision?.hypothesis === mainScenario.correctHypothesis) {
+    if (decision.justification === 'strong') decisionPoints = 200;
+    else if (decision.justification === 'weak') decisionPoints = 120;
   }
-}
 
-function eliminationCardText(level: EliminationQuality, wrongCount: number): string {
-  switch (level) {
-    case 'both_correct':
-      return 'استبعاد ممتاز: رفضت الفرضيتين المنافسين بأدلة مناسبة.';
-    case 'one_correct':
-      return 'استبعاد جيد: رفضت فرضية منافسة واحدة بدليل مناسب.';
-    case 'none':
-      return 'بدون استبعاد: حسمت بدون ما تُسقط البدائل.';
-    case 'has_wrong': {
-      if (wrongCount === 1) return 'استبعاد غير دقيق: حاولت رفض فرضية بدليل غير مناسب مرة واحدة.';
-      if (wrongCount === 2) return 'استبعاد غير دقيق: حاولت رفض فرضية بدليل غير مناسب مرتين.';
-      return `استبعاد غير دقيق: حاولت رفض فرضية بدليل غير مناسب ${wrongCount} مرات.`;
+  // في حالة التسرع: سقف القرار ينخفض + خصم
+  if (rushedDecision) {
+    const capped = Math.min(decisionPoints, 120);
+    if (capped !== decisionPoints) {
+      decisionPoints = capped;
     }
+    breakdown.push({ label: 'قرار متسرع (قبل فتح دليلين)', points: -20 });
   }
-}
 
-function noiseCardText(level: NoiseQuality): string {
-  switch (level) {
-    case 'clean':
-      return 'نضيف: التزمت بمؤشرات قابلة للقياس.';
-    case 'overweighted_e2':
-      return 'في وزن زائد: اعتمدت على مؤشر (الفواتير/المتوسط) كأنه حاسم.';
-    case 'used_noise_e5':
-      return 'في ضجيج: دخلت رأي عام في قرارك.';
+  if (decisionPoints > 0) {
+    breakdown.push({
+      label: decisionPoints === 200 ? 'قرار صحيح بتبرير قوي' : 'قرار صحيح بتبرير مقبول',
+      points: decisionPoints,
+    });
   }
-}
 
-function deriveThinkingLevel(outcome: CaseOutcome, evidence: EvidenceStrength): ThinkingLevel {
-  if (outcome !== 'correct') return 'unacceptable';
-  if (evidence === 'strong') return 'sound';
-  // correct + weak
-  return 'weak';
-}
+  // 3) الاستبعاد الصحيح
+  const validRejectH1 = (attempt.steps || []).some(
+    (s) => s.action === 'reject_hypothesis' && s.valid === true && s.hypothesis === 'H1'
+  );
+  const validRejectH2 = (attempt.steps || []).some(
+    (s) => s.action === 'reject_hypothesis' && s.valid === true && s.hypothesis === 'H2'
+  );
 
-export function buildEvaluation(attempt: Attempt) {
-  const outcome = attempt.finalDecision?.outcome || (attempt.status === 'no_decision' ? 'no_decision' : 'incorrect');
-  const evidenceLevel = attempt.finalDecision?.justification || 'none';
-  const eliminationInfo = getEliminationInfo(attempt);
-  const elimination = eliminationInfo.level;
-  const wrongRejectionCount = eliminationInfo.wrongCount;
-  const noise = getNoiseQuality(attempt);
+  if (validRejectH1) breakdown.push({ label: 'استبعاد H1 بشكل صحيح', points: 60 });
+  if (validRejectH2) breakdown.push({ label: 'استبعاد H2 بشكل صحيح', points: 60 });
+  if (validRejectH1 && validRejectH2) breakdown.push({ label: 'مكافأة استبعاد البديلين', points: 40 });
 
-  const cards = {
-    evidence: { level: evidenceLevel, text: evidenceCardText(evidenceLevel) },
-    elimination: { level: elimination, text: eliminationCardText(elimination, wrongRejectionCount) },
-    noise: { level: noise, text: noiseCardText(noise) },
-  };
+  // 4) أخطاء الاستبعاد
+  const wrongRejectCount = (attempt.steps || []).filter((s) => s.action === 'reject_hypothesis' && s.valid === false).length;
+  if (wrongRejectCount > 0) breakdown.push({ label: `محاولات استبعاد غلط ×${wrongRejectCount}`, points: -15 * wrongRejectCount });
 
-  const thinking = deriveThinkingLevel(outcome, evidenceLevel);
+  // 5) ضجيج/فخاخ
+  const usedE5 = didUseEvidence(attempt.steps || [], 'E5');
+  if (usedE5) breakdown.push({ label: 'استخدام كلام عام كدليل', points: -25 });
 
-  return { outcome, evidenceLevel, elimination, noise, wrongRejectionCount, cards, thinking };
+  const usedOnlyE2InDecision = decision?.evidence?.length === 1 && decision.evidence[0] === 'E2';
+  if (usedOnlyE2InDecision) breakdown.push({ label: 'اعتماد على مؤشر عام لوحده', points: -10 });
+
+  // 6) كفاءة (اختياري)
+  const openedTotal = Array.isArray(attempt.discoveredEvidence) ? attempt.discoveredEvidence.length : 0;
+  const strongAndCorrect = outcome === 'correct' && decision?.justification === 'strong' && decision?.hypothesis === mainScenario.correctHypothesis;
+  if (strongAndCorrect && openedTotal >= 2 && openedTotal <= 3) {
+    breakdown.push({ label: 'كفاءة في استخدام خطوات التحقيق', points: 10 });
+  }
+
+  const score = Math.max(0, breakdown.reduce((sum, b) => sum + b.points, 0));
+  return { score, breakdown, outcome, rushedDecision, wrongRejectCount, validRejectH1, validRejectH2, usedE5, usedOnlyE2InDecision };
 }
 
 // =====================
-// 4) Feedback نهائي
+// 4) رسائل النهاية (بسيطة ومصرية)
 // =====================
-export function generateFeedback(attempt: Attempt): string {
-  const { outcome, evidenceLevel, elimination, noise, wrongRejectionCount } = buildEvaluation(attempt);
+function buildEndMessage(meta: ReturnType<typeof buildScore>, attempt: Attempt): string {
+  const decision = attempt.finalDecision;
 
-  if (outcome === 'no_decision') {
-    return 'جمعت معلومات… لكن ما حسمتش قرار. التحليل لازم ينتهي بقرار حتى لو في عدم يقين.';
+  if (meta.outcome === 'no_decision') {
+    return 'جمعت شوية معلومات بس ماحسمتش قرار. حتى لو مش متأكد 100% لازم تختار تفسير في الآخر.';
   }
 
-  if (outcome === 'incorrect') {
-    // رسائل فشل مركّزة على الخطأ المنهجي
-    if (evidenceLevel === 'noise') {
-      return 'قرارك مبني على رأي عام، مش على مؤشر من المتجر نفسه. ارجع للمقاييس: حركة دخول / فواتير / مخزون / توقيت.';
+  if (meta.outcome === 'incorrect') {
+    if (meta.usedE5) {
+      return 'القرار طلع غلط… وكمان اعتمدت على كلام عام. جرّب تركز على مؤشرات من جوه المحل.';
     }
-    if (evidenceLevel === 'invalid') {
-      return 'اخترت تبرير لا يدعم قرارك منطقيًا. حاول تربط الدليل بالفرضية اللي “يفرّق” بينها وبين غيرها.';
+    if (meta.rushedDecision) {
+      return 'استعجلت في القرار. افتح دليلين على الأقل وبعدين احكم.';
     }
-    if (evidenceLevel === 'none') {
-      return 'حسمت بدون أي دليل. اجمع مؤشر واحد على الأقل قبل إعلان القرار.';
+    if (!decision?.evidence || decision.evidence.length === 0 || decision.justification === 'none') {
+      return 'حكمت من غير دليل واضح. افتح شوية أدلة وبعدين قرر.';
     }
-    // فشل طبيعي (اختيار فرضية خاطئة بناءً على مؤشر ضعيف)
-    return 'قفلت على تفسير قبل ما تقارن مؤشرات كفاية. حاول تدور على تناقض مباشر بين “المسجل” و“اللي حصل فعلاً”.';
+    return 'القرار طلع غلط. جرّب المرة الجاية تقارن بين مؤشرين مختلفين قبل ما تقفل.';
   }
 
-  // outcome correct
-  if (evidenceLevel === 'strong') {
-    if (elimination === 'both_correct' && noise === 'clean') {
-      return 'شغل ممتاز: استخدمت دليل يفرّق بين الفرضيات، واستبعدت البدائل قبل ما تحسم.';
+  // correct
+  const eliminatedCount = (meta.validRejectH1 ? 1 : 0) + (meta.validRejectH2 ? 1 : 0);
+
+  if (meta.rushedDecision) {
+    return 'إجابتك صح… بس استعجلت. افتح دليلين على الأقل عشان مايبقاش الموضوع حظ.';
+  }
+
+  if (decision?.justification === 'strong') {
+    if (eliminatedCount === 2 && meta.wrongRejectCount === 0 && !meta.usedE5) {
+      return 'ممتاز جدًا: قرار صح بدليل قوي، وكمان استبعدت البديلين بشكل نظيف.';
     }
-    if (elimination === 'none') {
-      return 'النتيجة صحيحة بدليل قوي، لكن المرة الجاية استبعد البدائل قبل ما تقفل.';
+    if (eliminatedCount === 0) {
+      return 'إجابتك صح بدليل قوي… بس كنت محتاج تستبعد بديل واحد على الأقل قبل ما تقفل.';
     }
-    if (elimination === 'has_wrong') {
-      if (wrongRejectionCount === 1) return 'وصلت للنتيجة، لكن عندك محاولة استبعاد غير دقيقة مرة واحدة.';
-      if (wrongRejectionCount === 2) return 'وصلت للنتيجة، لكن عندك محاولتين استبعاد غير دقيقتين.';
-      return `وصلت للنتيجة، لكن عندك ${wrongRejectionCount} محاولات استبعاد غير دقيقة.`;
+    if (meta.wrongRejectCount > 0) {
+      return 'إجابتك صح، وفي الآخر مشيت كويس… بس كان عندك محاولات استبعاد غلط في الأول.';
     }
-    return 'حل صحيح بدليل قوي. ممتاز، ومع شوية استبعاد أكتر هتكون أقوى.';
+    if (eliminatedCount === 1) {
+      return 'تمام جدًا: قرار صح بدليل قوي. لو استبعدت البديل التاني كمان هتبقى أقوى.';
+    }
+    return 'قرار صح بدليل قوي. شغل كويس.';
   }
 
   // correct but weak
-  if (noise === 'overweighted_e2') {
-    return 'وصلت لتفسير صحيح، لكن اعتمدت على مؤشر عام كأنه حاسم. ركّز على الدليل اللي يفرّق بين الفرضيات.';
+  if (meta.usedOnlyE2InDecision) {
+    return 'إجابتك صح… بس اعتمدت على رقم لوحده. حاول تجيب دليل يفرق أكتر قبل ما تحسم.';
   }
 
-  return 'النتيجة صحيحة، لكن تبريرك ضعيف. حاول تجمع مؤشر يثبت التناقض بشكل مباشر.';
+  return 'إجابتك صح، بس تبريرك كان ضعيف شوية. حاول المرة الجاية تجيب دليل أقوى.';
 }
 
 // =====================
@@ -287,58 +295,46 @@ export function buildTimeline(steps: Step[]): TimelineItem[] {
 // =====================
 // 6) Game Result
 // =====================
-function outcomeTitle(outcome: CaseOutcome): string {
-  switch (outcome) {
-    case 'correct':
-      return 'قرار صحيح';
-    case 'incorrect':
-      return 'قرار غير صحيح';
-    case 'no_decision':
-      return 'بدون قرار';
-  }
-}
 
-function thinkingTitle(level: ThinkingLevel): string {
-  switch (level) {
-    case 'sound':
-      return 'تفكير سليم';
-    case 'weak':
-      return 'تفكير يحتاج تحسين';
-    case 'unacceptable':
-      return 'منهج غير مقبول';
+export function calculateAttemptResult(attempt: Attempt, attemptUsed: number): GameResult {
+  const meta = buildScore(attempt);
+  const message = buildEndMessage(meta, attempt);
+
+  const result: GameResult = {
+    outcome: meta.outcome,
+    outcomeTitle: outcomeTitle(meta.outcome),
+    score: meta.score,
+    feedbackText: message,
+    breakdown: meta.breakdown,
+    timeline: buildTimeline(attempt.steps || []),
+    attemptUsed,
+  };
+
+  if (meta.outcome === 'correct') {
+    result.rank = getSuccessRank(meta.score);
   }
+
+  return result;
 }
 
 export function calculateGameResult(session: GameSession): GameResult {
   const currentAttempt = session.attempts[session.currentAttempt - 1];
 
   // احتياط: لو مفيش محاولة (نادر)
-  const attempt = currentAttempt || {
-    attemptNumber: session.currentAttempt,
-    steps: [],
-    discoveredEvidence: [],
-    rejectedHypotheses: [],
-    status: 'failed' as const,
-  };
+  const attempt: Attempt =
+    currentAttempt ||
+    ({
+      attemptNumber: session.currentAttempt,
+      steps: [],
+      discoveredEvidence: [],
+      rejectedHypotheses: [],
+      status: 'failed',
+    } as Attempt);
 
-  const evaluation = buildEvaluation(attempt);
-
-  return {
-    outcome: evaluation.outcome,
-    outcomeTitle: outcomeTitle(evaluation.outcome),
-    thinking: evaluation.thinking,
-    thinkingTitle: thinkingTitle(evaluation.thinking),
-    cards: evaluation.cards,
-    feedbackText: generateFeedback(attempt),
-    timeline: buildTimeline(attempt.steps || []),
-    attemptUsed: session.currentAttempt,
-  };
+  return calculateAttemptResult(attempt, session.currentAttempt);
 }
 
-export function generateGameOverFeedback(session: GameSession): string {
-  const lastAttempt = session.attempts[session.currentAttempt - 1];
-  if (!lastAttempt) {
-    return 'انتهت المحاولات. حاول مرة ثانية مع التركيز على المؤشرات القابلة للقياس.';
-  }
-  return generateFeedback(lastAttempt);
+export function generateGameOverFeedback(): string {
+  // Feedback عام جدًا: لا يذكر الحل ولا اسم دليل بعينه
+  return 'خلصت المحاولات. المرة الجاية حاول ما تعتمدش على مؤشر واحد… وقبل ما تحسم، استبعد بديل واحد بدليل مناسب.';
 }
