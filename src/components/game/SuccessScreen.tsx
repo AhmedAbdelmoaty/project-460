@@ -11,9 +11,6 @@ interface SuccessScreenProps {
 
 export function SuccessScreen({ session, onRestart }: SuccessScreenProps) {
   const result = calculateGameResult(session);
-  const scoreThresholds = [120, 200, 300];
-  const nextThreshold = scoreThresholds.find((threshold) => result.score < threshold);
-  const pointsToNext = nextThreshold ? Math.max(nextThreshold - result.score, 0) : 0;
 
   const rankStyles: Record<string, { badge: string; glow: string }> = {
     خبير: {
@@ -49,17 +46,17 @@ export function SuccessScreen({ session, onRestart }: SuccessScreenProps) {
 
           <CardContent className="relative p-4 space-y-4">
             <div className="flex flex-col items-center gap-4">
-              <div className="relative flex flex-col items-center gap-2 animate-in zoom-in-75 fade-in duration-500">
-                <div className="absolute -top-5 -right-5 text-xl animate-pulse">✨</div>
-                <div className="absolute -top-3 -left-4 text-xl animate-pulse delay-150">⭐</div>
-                <div className={`relative w-36 h-36 rounded-full bg-gradient-to-br from-success/30 via-background to-success/10 border border-success/30 flex items-center justify-center ${rankStyle?.glow ?? 'shadow-[0_0_22px_rgba(34,197,94,0.25)]'}`}>
-                  <div className="absolute inset-2 rounded-full border-2 border-success/50 shadow-inner" />
-                  <div className="absolute inset-4 rounded-full border-2 border-success/20" />
+              <div className="relative flex flex-col items-center gap-1 animate-in zoom-in-75 fade-in duration-500">
+                <div className="absolute -top-3 -right-3 text-base animate-pulse">✨</div>
+                <div className="absolute -top-2 -left-3 text-base animate-pulse delay-150">⭐</div>
+                <div className={`relative w-24 h-24 rounded-full bg-gradient-to-br from-success/30 via-background to-success/10 border border-success/30 flex items-center justify-center ${rankStyle?.glow ?? 'shadow-[0_0_22px_rgba(34,197,94,0.25)]'}`}>
+                  <div className="absolute inset-1.5 rounded-full border-2 border-success/50 shadow-inner" />
+                  <div className="absolute inset-3 rounded-full border-2 border-success/20" />
                   <div className="absolute inset-0 rounded-full bg-[conic-gradient(from_210deg,rgba(255,255,255,0.35),transparent_40%,rgba(255,255,255,0.2))] opacity-70" />
                   <div className="absolute inset-0 rounded-full bg-[radial-gradient(circle_at_30%_30%,rgba(255,255,255,0.35),transparent_55%)]" />
                   <div className="relative z-10 flex flex-col items-center justify-center">
-                    <span className="text-sm text-muted-foreground tracking-widest">النقاط</span>
-                    <span className="text-4xl md:text-5xl font-black text-foreground drop-shadow-sm">{result.score}</span>
+                    <span className="text-xs text-muted-foreground tracking-widest">النقاط</span>
+                    <span className="text-2xl md:text-3xl font-black text-foreground drop-shadow-sm">{result.score}</span>
                   </div>
                 </div>
                 {result.rank && (
@@ -76,17 +73,6 @@ export function SuccessScreen({ session, onRestart }: SuccessScreenProps) {
                 )}
               </div>
 
-              <div className="w-full max-w-md space-y-1">
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>نقاطك الحالية: {result.score}</span>
-                  {nextThreshold ? <span>الهدف التالي: {nextThreshold}</span> : <span>أعلى مستوى</span>}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {nextThreshold
-                    ? `فاضلك ${pointsToNext} نقطة وتوصل للمستوى اللي بعده`
-                    : 'أنت في أعلى مستوى'}
-                </p>
-              </div>
             </div>
 
             <div className="bg-muted/50 rounded-xl p-3">
