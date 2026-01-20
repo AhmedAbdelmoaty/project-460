@@ -52,6 +52,7 @@ const Index = () => {
       return (
         <FailureScreen
           feedback={failureFeedback}
+          score={failureScore}
           remainingAttempts={remainingAttempts - 1}
           onRetry={retryAttempt}
         />
